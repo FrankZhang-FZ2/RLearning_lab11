@@ -1,7 +1,7 @@
 ---
 title: "Lab 11 - Smoking during pregnancy"
-author: "Insert your name here"
-date: "Insert date here"
+author: "Qilin Zhang"
+date: "3/30/23"
 output: github_document
 ---
 
@@ -11,17 +11,208 @@ output: github_document
 library(tidyverse) 
 library(tidymodels)
 library(openintro)
+library(psych)
+library(skimr)
+library(boot)
 ```
 
 ### Exercise 1
 
-Remove this text, and add your answer for Exercise 1 here.
-Add code chunks as needed.
-Don't forget to label your code chunk.
-Do not use spaces in code chunk labels.
+I see 13 variables in total. There are 6 numeric variables and 7 categorical variables. 
+```{r check}
+data(ncbirths)
 
-### Exercise 2
+describe(ncbirths)
+skim(ncbirths)
 
-...
+# visualization
 
-Add exercise headings as needed.
+ncbirths %>%
+  ggplot(aes(x=weight))+
+  geom_density()
+
+ncbirths %>%
+  ggplot(aes(x=gained))+
+  geom_density()
+
+ncbirths %>%
+  ggplot(aes(x=visits))+
+  geom_density()
+
+ncbirths %>%
+  ggplot(aes(x=weeks))+
+  geom_density()
+```
+
+
+### Exercise 2&3
+
+It seems like there is only a few means lower than 7.250462 in the bootstrapping sample. After accounting for the proportion of the means lower than 7.25, the p value with 15000 rep of bootstraping is 0.0005. As a result, we can conclude that the mean of child's weight is significantly lower than those in 1995.
+
+```{r white_baby}
+ncbirths_white <- ncbirths %>%
+  filter(whitemom == "white")
+
+mean(ncbirths_white$weight)
+
+#bootstrap
+boot_bir_white <- ncbirths_white %>%
+  # specify the variable of interest
+  specify(response = weight) %>%
+  # generate 15000 bootstrap samples
+  generate(reps = 15000, type = "bootstrap") %>%
+  # calculate the mean of each bootstrap sample 
+  calculate(stat = "mean")
+
+boot_bir_white %>%
+  summarize(lower = quantile(stat, 0.025),
+            mean = mean(stat),
+            upper = quantile(stat, 0.975))
+
+boot_bir_white$stat <- boot_bir_white$stat - (mean(ncbirths_white$weight) - 7.43)
+mean(boot_bir_white$stat)
+
+boot_bir_white %>%
+  summarize(lower = quantile(stat, 0.025),
+            mean = mean(stat),
+            upper = quantile(stat, 0.975))
+
+boot_bir_white %>%
+  filter(stat <= 7.250462) %>%
+  nrow()/nrow(boot_bir_white)# p value = 0.0005
+
+
+#visual
+boot_bir_white %>%
+  ggplot(aes(x=stat)) + 
+  geom_histogram(binwidth = 0.01)+
+  geom_vline(xintercept = 7.324958)+
+  geom_vline(xintercept = 7.53526)+
+  geom_vline(xintercept = 7.250462, color = "red")
+  labs(title = "distribution for bootstrap means")
+
+```
+
+###exercise 4
+
+one sample t-test suggests that the mean of child's weight is significantly lower than those in 1995.
+```{r hypo_test}
+t.test(x= ncbirths_white$weight,mu = 7.43)
+```
+
+###exercise 5 -6 
+
+From the plots, it seems like the baby weight of non-smokers are higher than smokers. 
+```{r boxplot}
+ncbirths %>%
+  ggplot(aes(x=habit, y = weight, color = habit)) + 
+  geom_boxplot()
+
+ncbirths_habitgiven <- ncbirths %>%
+  filter(habit != "NA")
+
+```
+
+###exercise 7+8
+
+Null hypothesis: There is no difference between baby weight with smoking and non-smoking parents among the population.
+Alternative hypothesis: There is difference between baby weight with smoking and non-smoking parents among the population.
+
+```{r}
+ncbirths_habitgiven %>%
+  group_by(habit) %>%
+  summarise(mean_weight = mean(weight),
+            median_weight = median(weight))
+
+```
+
+###exercise 9
+
+There is difference between baby weight with smoking and non-smoking parents among the population. In particular, the baby weight with smoking parents are significantly lower than those of the non-smoking parents. The confident interval represents that we have 95% of confident that the results t value will land between 0.45-4.16. 
+
+```{r t-test_boot}
+
+Smokers <- ncbirths_habitgiven %>%
+  filter(habit=="smoker") %>%
+  select(weight)
+Smokers$id <- c(1:nrow(Smokers))
+
+nonsmokers <- ncbirths_habitgiven %>%
+  filter(habit=="nonsmoker") %>%
+  select(weight)
+nonsmokers$id <- c(1:nrow(nonsmokers))
+smoking_boot <- merge(nonsmokers,Smokers,
+                      by = "id",
+                      all = T) %>%
+  select(!id)
+
+tstat <- function(data, i) {
+  x <- data[i,1]
+  y <- data[i,2]
+  t.test(x, y)$statistic
+}
+
+set.seed(1234)
+boot_result <- boot(smoking_boot, tstat, R=15000)
+mean(boot_result$t)
+
+#confident interval
+quantile(boot_result$t,0.025)
+quantile(boot_result$t,0.975)
+
+# transfer t to p
+t_to_p <- function(t, df) {
+  p <- 2 * pt(abs(t), df = df, lower.tail = FALSE)
+  return(p)
+}
+t_to_p(mean(boot_result$t) ,999-2)
+
+t.test(smoking_boot$weight.x,smoking_boot$weight.y)
+
+```
+
+
+
+###exercise 11
+
+It looks like cutoff is at 34 to 35.
+
+```{r cutoff}
+cutoff <- ncbirths_habitgiven%>%
+  filter(mature=="younger mom")%>%
+  select(mage)%>%
+  max()%>%
+  as.numeric()
+cutoff
+
+ggplot(ncbirths_habitgiven, aes(x = mage, fill = mature))+
+  geom_histogram(binwidth = 0.5)+
+  geom_vline(xintercept = cutoff+0.5)
+```
+
+###exercise 12+13
+
+Null hypothesis:  the proportion of low birth weight babies is not different among mature or non-mature mothers
+Alternative hypothesis:  the proportion of low birth weight babies is higher for mature mothers
+
+It seems like there is no significant difference on the proportion of low birthweight babies between mature and non-mature mothers. Therefore, the original hypothesis in the question does not stand. 
+
+```{r chisquare}
+
+mature_lowweight <- ncbirths_habitgiven %>%
+  select(c(mature,lowbirthweight)) %>%
+  table()
+#direct way
+chisq.test(mature_lowweight,simulate.p.value = T,B = 10000)
+
+chi_sq_stat <- function(data, indices) {
+  tbl <- data[indices,]
+  chisq <- chisq.test(tbl)$statistic
+  return(chisq)
+}
+
+boot_results <- boot(data = mature_lowweight, statistic = chi_sq_stat, R = 10000)
+# confident intervals
+boot.ci(boot_results, type = "basic",conf = 0.95)
+
+```
